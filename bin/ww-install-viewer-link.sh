@@ -28,15 +28,20 @@ fi
 
 # What the shortcut runs inside the distro. A login shell, because wsl.exe
 # starts the command without one and PATH would lack the system's programs;
-# by its full path for the same reason. ww-start-session returns once the
-# session is up. DEBUG=1 keeps ww-start-viewer in the foreground, for the
-# console window below.
+# by its full path for the same reason. weaselwayd comes first so that the
+# viewer finds a listener; then the session and the viewer start together.
+# The viewer can run before a compositor is up -- its window stays empty until
+# one is -- and its PowerShell check and connection attempt overlap with the
+# session's startup instead of following it. DEBUG=1 keeps ww-start-viewer in
+# the foreground, for the console window below. If the session fails, the
+# viewer is stopped and the error stays on the console. No double quotes:
+# this command is embedded in a double-quoted bash -lc argument.
 BASH_PATH="$(command -v bash)"
 if [ -e /run/current-system/sw/bin/bash ]; then
     # Not the store path: that one goes away with an update.
     BASH_PATH=/run/current-system/sw/bin/bash
 fi
-COMMAND='systemctl is-active --quiet weaselway-session || ww-start-session; DEBUG=1 exec ww-start-viewer'
+COMMAND='systemctl --user start weaselwayd.service || true; if systemctl is-active --quiet weaselway-session; then DEBUG=1 exec ww-start-viewer; fi; ww-start-session & SESSION=$!; DEBUG=1 ww-start-viewer & VIEWER=$!; if ! wait $SESSION; then kill $VIEWER 2>/dev/null || true; wait $VIEWER || true; exit 1; fi; wait $VIEWER'
 
 # Single quotes are PowerShell's literal strings; a quote inside is doubled.
 quote() {

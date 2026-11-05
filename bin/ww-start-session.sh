@@ -214,6 +214,15 @@ fi
 # A previous run that failed leaves the unit behind in failed state.
 sudo systemctl reset-failed "${UNIT}.service" 2>/dev/null || true
 
+# The compositor creates its Wayland socket when it is ready for clients.
+# Remember the moment before it starts, so the wait below can tell a socket it
+# created apart from one a crashed predecessor left behind -- even when it
+# reuses the same name. The reference file must be created before the unit
+# starts; its mtime is the cut-off.
+RUNTIME_DIR="/run/user/${SESSION_UID}"
+READY_REF="$(mktemp "${RUNTIME_DIR}/.weaselway-ready.XXXXXX" 2>/dev/null || mktemp)"
+trap 'rm -f "${READY_REF}"' EXIT
+
 sudo systemd-run --unit="${UNIT}" --collect \
     --quiet --description="Weaselway session (${SESSION})" \
     "${PROPERTIES[@]}" \
@@ -223,7 +232,8 @@ sudo systemd-run --unit="${UNIT}" --collect \
 # stopped by hand.
 systemctl --user start weaselwayd.service || true
 
-sleep 3
+# Catch a session that dies immediately before spending time on the
+# keepalive.
 if ! systemctl --quiet is-active "${UNIT}.service"; then
     systemctl --no-pager status "${UNIT}.service" || true
     exit 1
@@ -236,12 +246,36 @@ fi
 # so that it is not attached to this terminal's console, which takes its
 # processes along when it is closed. The distro's name unquoted: wsl.exe would
 # take the quotes as part of it, and a name has no spaces.
+#
+# Started before waiting for the compositor: PowerShell takes a second to
+# start, and that second overlaps with the compositor's own startup instead
+# of adding to it.
 POWERSHELL=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
 if [ -n "${WSL_DISTRO_NAME:-}" ] && [ -x "${POWERSHELL}" ]; then
     KEEPALIVE="-d ${WSL_DISTRO_NAME} --exec /bin/sh -c \"while $(command -v systemctl) -q is-active ${UNIT}.service; do sleep 5; done\""
     (cd /mnt/c && "${POWERSHELL}" -NoProfile -NonInteractive -Command \
         "Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '${KEEPALIVE//\'/\'\'}'" \
         < /dev/null) || echo "warning: could not keep the distro running; it stops once no WSL window is open" >&2
+fi
+
+# Wait for the compositor's Wayland socket instead of sleeping for a fixed
+# time. GNOME is usually there in well under a second; the cap is only for a
+# compositor that is unusually slow to start. If it never appears, carry on:
+# the session may still be usable, and the viewer reports the missing socket.
+for _ in $(seq 1 100); do
+    if ! systemctl --quiet is-active "${UNIT}.service"; then
+        break
+    fi
+    if [ -n "$(find "${RUNTIME_DIR}" -maxdepth 1 -name 'wayland-*' -type s \
+        -newer "${READY_REF}" -print -quit 2>/dev/null)" ]; then
+        break
+    fi
+    sleep 0.1
+done
+
+if ! systemctl --quiet is-active "${UNIT}.service"; then
+    systemctl --no-pager status "${UNIT}.service" || true
+    exit 1
 fi
 
 cat <<MSG

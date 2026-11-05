@@ -41,8 +41,12 @@ SHARED_MEMORY_PATH="WSL\\${VM_ID^^}\\wslg"
 # where nobody would see the box to close it.
 POWERSHELL=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
 MESSAGE="This Windows session cannot see the shared memory of the WSL VM: WSL was started from another Windows session (SSH, Remote Desktop, a scheduled task). Run wsl --shutdown, then start the distro again from this desktop."
-if [ -x "${POWERSHELL}" ]; then
-    STATUS=0
+
+# Returns 3 if the section is not there, 0 otherwise (also when PowerShell is
+# not available). Runs alongside the viewer in both modes, so that its startup
+# overlaps with the viewer's instead of delaying it.
+check_shared_memory() {
+    [ -x "${POWERSHELL}" ] || return 0
     (cd /mnt/c && "${POWERSHELL}" -NoProfile -NonInteractive -Command "
         try { [IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting('${SHARED_MEMORY_PATH}') }
         catch [IO.DirectoryNotFoundException] {
@@ -50,20 +54,19 @@ if [ -x "${POWERSHELL}" ]; then
                 (New-Object -ComObject WScript.Shell).Popup('${MESSAGE}', 0, 'Weaselway', 16) | Out-Null
             }
             exit 3
-        } catch {}" < /dev/null > /dev/null 2>&1) || STATUS=$?
-    if [ "${STATUS}" = 3 ]; then
-        echo "error: ${MESSAGE}" >&2
-        exit 1
-    fi
-fi
+        } catch {}" < /dev/null > /dev/null 2>&1)
+}
 
+# The desktop size the client asks for at connect. With /dynamic-resolution it
+# follows later window resizes.
 COMMAND=(
     "${VIEWER}" /u:dummy /d:dummy /p:dummy
     /v:vsock://"${VM_ID}":"${PORT}"
     /wslgsharedmemorypath:"${SHARED_MEMORY_PATH}"
     /cert:ignore
     /dynamic-resolution
-    /w:1280
+    /w:1920
+    /h:1080
     /log-level:warn
     /multitouch
     /sdl-touchpad-gestures
@@ -72,9 +75,26 @@ COMMAND=(
     "$@"
 )
 
-# DEBUG=1 runs the viewer in the foreground, with its log on the terminal.
+# DEBUG=1 runs the viewer in the foreground, with its log on the terminal. It
+# starts in the background anyway so that the check overlaps with its startup;
+# wait makes it foreground again. If the check fails, the viewer is stopped
+# before the error is printed.
 if [ "${DEBUG:-}" = 1 ]; then
-    exec "${COMMAND[@]}"
+    "${COMMAND[@]}" &
+    VIEWER_PID=$!
+    # The shortcut stops this script when the session fails to start; take the
+    # viewer along, since it is a child now, not the process the shortcut sees.
+    trap 'kill "${VIEWER_PID}" 2> /dev/null || true' TERM INT
+    STATUS=0
+    check_shared_memory || STATUS=$?
+    if [ "${STATUS}" = 3 ]; then
+        kill "${VIEWER_PID}" 2> /dev/null || true
+        wait "${VIEWER_PID}" 2> /dev/null || true
+        echo "error: ${MESSAGE}" >&2
+        exit 1
+    fi
+    wait "${VIEWER_PID}" || exit $?
+    exit 0
 fi
 
 # Otherwise it runs on in the background, in a session of its own so that
@@ -84,8 +104,22 @@ setsid "${COMMAND[@]}" > "${LOG}" 2>&1 < /dev/null &
 VIEWER_PID=$!
 disown
 
-# A viewer that cannot connect or map the shared memory exits right away.
-sleep 2
+# The check runs while the viewer starts. PowerShell takes about a second to
+# come up, which is also long enough for a viewer that cannot start to exit;
+# failures after that end up in the log.
+STATUS=0
+check_shared_memory || STATUS=$?
+if [ "${STATUS}" = 3 ]; then
+    kill "${VIEWER_PID}" 2> /dev/null || true
+    echo "error: ${MESSAGE}" >&2
+    exit 1
+fi
+
+# Without PowerShell the check returned at once and there was no grace period.
+if [ ! -x "${POWERSHELL}" ]; then
+    sleep 0.5
+fi
+
 if ! kill -0 "${VIEWER_PID}" 2> /dev/null; then
     echo "error: the viewer exited; its log ($LOG):" >&2
     cat "${LOG}" >&2

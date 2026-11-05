@@ -130,8 +130,10 @@ ww-install-viewer-link
 
 This puts a shortcut named "Weaselway" on the Windows desktop;
 `ww-install-viewer-link <name>` uses another name. The shortcut starts the
-distro and the session if they are not running, then opens the viewer. A
-minimized console window stays open next to the viewer and closes with it.
+distro, `weaselwayd` and the session if they are not running, and opens the
+viewer while the session is still starting; the window stays empty until the
+desktop draws its first frame. A minimized console window stays open next to
+the viewer and closes with it.
 
 <!-- IMAGE (small): the "Weaselway" shortcut on the Windows desktop. -->
 
@@ -254,6 +256,14 @@ mouse, audio and X11 apps have not been tested.
 
 `ww-start-viewer` appends its arguments to the `sdl-freerdp.exe` command line,
 so any FreeRDP option can be added or overridden for one run.
+
+The viewer opens with a 1920x1080 desktop. Because the session uses dynamic
+resolution, resizing the window changes the desktop's resolution too. To start
+at another size, pass it on the command line:
+
+```sh
+ww-start-viewer /w:1280 /h:768
+```
 
 The session sees an ordinary keyboard. Set the layout in the desktop's own
 keyboard settings, not in the viewer.

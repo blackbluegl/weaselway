@@ -10,7 +10,14 @@
 set -euo pipefail
 
 # The versions the NixOS image ships (flake.lock).
-DXGDRM_VERSION=v1.2.0
+#
+# v1.2.2 dropped the module for the 6.18.33.2 kernel, which this distro may
+# still run; v1.2.1 is the last release with it. The UAPI header comes from
+# v1.2.2, which declares DRM_IOCTL_DXGDRM_SHIFT_VBLANK, the ioctl weaselwayd
+# needs to line its vblank up with the viewer. The older module does not
+# implement it; weaselwayd logs that and keeps going without the correction.
+DXGDRM_VERSION=v1.2.1
+DXGDRM_UAPI_VERSION=v1.2.2
 VIEWER_VERSION=v1.2.0rc1
 MESA_REV=7cf21daf944ff0c19a51aca664b518f3baf79837 # branch mesa-26.2.6-wsl
 
@@ -41,7 +48,7 @@ curl -fL --progress-bar -o "${BUILD}/dxgdrm.tar.gz" \
     "https://github.com/weaselway/dxgdrm/releases/download/${DXGDRM_VERSION}/dxgdrm-${KERNEL}.tar.gz" ||
     die "dxgdrm ${DXGDRM_VERSION} has no module for the kernel ${KERNEL}"
 curl -fsSL -o "${BUILD}/dxgdrm_drm.h" \
-    "https://raw.githubusercontent.com/weaselway/dxgdrm/${DXGDRM_VERSION}/dxgdrm_drm.h"
+    "https://raw.githubusercontent.com/weaselway/dxgdrm/${DXGDRM_UAPI_VERSION}/dxgdrm_drm.h"
 
 step "Installing packages"
 # GNOME recommends a display manager, NetworkManager and more that have no
