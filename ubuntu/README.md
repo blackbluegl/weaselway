@@ -28,7 +28,9 @@ wsl --install Ubuntu-26.04
 ```
 
 Ubuntu asks for a user name and a password on the first start. The password
-is the one for `sudo` and for the GNOME lock screen.
+is the one for the GNOME lock screen. `sudo` asks for it during installation;
+afterwards the commands that start the desktop session run without a password
+(see below).
 
 systemd is on by default in Ubuntu's WSL image. If you changed that, set
 `systemd=true` under `[boot]` in `/etc/wsl.conf` and run `wsl --shutdown`.
@@ -45,6 +47,13 @@ cd weaselway
 
 The script asks for your password for `sudo`. You can run it again at any
 time; it rebuilds and reinstalls everything.
+
+At the end it installs `/etc/sudoers.d/weaselway`. That rule lets your user run
+the commands that `ww-start-session` needs (`chvt`, `systemctl` for
+`weaselway-session`, and `systemd-run`) without a password, so the desktop
+shortcut does not prompt on its minimized console. Other `sudo` commands still
+ask. `systemd-run` can start arbitrary units and is therefore as powerful as
+root for this user; the alternative would be a static unit with a polkit rule.
 
 The script changes the system in these places:
 
@@ -73,6 +82,9 @@ The script changes the system in these places:
   `/opt/weaselway/viewer`.
 - It adds the system unit `weaselway-prep.service`, which loads the module at
   boot, and the user unit `weaselwayd.service`.
+- It adds `/etc/sudoers.d/weaselway`, which allows your user to run the
+  commands behind `ww-start-session` without a password. Other `sudo` commands
+  still ask.
 - It adds your user to the groups `render`, `video` and `input`.
 - It masks WSL's `wslg-session.service` for all users. That unit replaces
   PipeWire's PulseAudio socket with a link to WSLg's PulseAudio, and the

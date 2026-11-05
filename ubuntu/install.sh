@@ -240,6 +240,29 @@ sudo systemctl --global mask wslg-session.service
 # until it hits its start limit and leaves the system degraded.
 sudo systemctl mask tpm-udev.path
 
+# ww-start-session starts a system unit on the virtual display and switches to
+# its VT, which needs root. On the NixOS image sudo does not ask for a
+# password; do the same here for just these commands, so that the desktop
+# shortcut does not prompt on a console that is minimized. Other sudo commands
+# still ask. systemd-run can start arbitrary units and is therefore as
+# powerful as root for this user; the alternative would be a static unit and
+# a polkit rule.
+step "Allowing the session to start without a password"
+SUDOERS_TMP=/etc/sudoers.d/weaselway.tmp
+SUDOERS_SRC="$(mktemp)"
+cat > "${SUDOERS_SRC}" <<EOF
+# Installed by weaselway. The desktop shortcut starts the session without a
+# password, as on the NixOS image. Other sudo commands still ask.
+$(id -un) ALL=(root) NOPASSWD: $(command -v chvt) 7, $(command -v systemctl) reset-failed weaselway-session.service, $(command -v systemctl) stop weaselway-session.service, $(command -v systemd-run) *
+EOF
+sudo install -m 440 -o root -g root "${SUDOERS_SRC}" "${SUDOERS_TMP}"
+rm -f "${SUDOERS_SRC}"
+if ! sudo visudo -cf "${SUDOERS_TMP}"; then
+    sudo rm -f "${SUDOERS_TMP}"
+    die "the generated sudoers rule is invalid"
+fi
+sudo mv -f "${SUDOERS_TMP}" /etc/sudoers.d/weaselway
+
 cat <<EOF
 
 Done. Restart WSL so that the module, the groups and the environment take
